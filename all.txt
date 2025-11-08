@@ -1,0 +1,172 @@
+# APE RMSE SUMMARY
+# GT: /home/bora/m3ed/m3ed/spot_indoor_building_loop/spot_indoor_building_loop_pose_evo_gt.txt
+# t_max: 0.5
+
+## DVIO (vio)
+M3ED_dvio_spot_indoor_building_loop_trial_0.txt: 0.133394
+M3ED_dvio_spot_indoor_building_loop_trial_1.txt: 0.109679
+M3ED_dvio_spot_indoor_building_loop_trial_2.txt: 0.103536
+M3ED_dvio_spot_indoor_building_loop_trial_3.txt: 0.112748
+M3ED_dvio_spot_indoor_building_loop_trial_4.txt: 0.124069
+M3ED_dvio_spot_indoor_building_loop_trial_5.txt: 0.122373
+M3ED_dvio_spot_indoor_building_loop_trial_6.txt: 0.092654
+M3ED_dvio_spot_indoor_building_loop_trial_7.txt: 0.128714
+M3ED_dvio_spot_indoor_building_loop_trial_8.txt: 0.10256
+M3ED_dvio_spot_indoor_building_loop_trial_9.txt: 0.095743
+AVERAGE: 0.112547
+
+## DVIO (visual_only)
+M3ED_dvio_spot_indoor_building_loop_trial_0_vi.txt: 0.120423
+M3ED_dvio_spot_indoor_building_loop_trial_1_vi.txt: 0.082959
+M3ED_dvio_spot_indoor_building_loop_trial_2_vi.txt: 0.082101
+M3ED_dvio_spot_indoor_building_loop_trial_3_vi.txt: 0.099591
+M3ED_dvio_spot_indoor_building_loop_trial_4_vi.txt: 0.108979
+M3ED_dvio_spot_indoor_building_loop_trial_5_vi.txt: 0.106432
+M3ED_dvio_spot_indoor_building_loop_trial_6_vi.txt: 0.072794
+M3ED_dvio_spot_indoor_building_loop_trial_7_vi.txt: 0.111291
+M3ED_dvio_spot_indoor_building_loop_trial_8_vi.txt: 0.086439
+M3ED_dvio_spot_indoor_building_loop_trial_9_vi.txt: 0.07667
+AVERAGE: 0.0947679
+
+## DEIO (vio)
+M3ED_deio_spot_indoor_building_loop_trial_0.txt: 1.770848
+M3ED_deio_spot_indoor_building_loop_trial_1.txt: 0.375097
+M3ED_deio_spot_indoor_building_loop_trial_2.txt: 1.011556
+M3ED_deio_spot_indoor_building_loop_trial_3.txt: 1.493493
+M3ED_deio_spot_indoor_building_loop_trial_4.txt: 1.826407
+M3ED_deio_spot_indoor_building_loop_trial_5.txt: 0.383297
+M3ED_deio_spot_indoor_building_loop_trial_6.txt: 2.293556
+M3ED_deio_spot_indoor_building_loop_trial_7.txt: 1.781101
+M3ED_deio_spot_indoor_building_loop_trial_8.txt: 0.54535
+M3ED_deio_spot_indoor_building_loop_trial_9.txt: 11.03194
+AVERAGE: 2.2512645
+
+## DEIO (visual_only)
+M3ED_deio_spot_indoor_building_loop_trial_0_vi.txt: 1.759153
+M3ED_deio_spot_indoor_building_loop_trial_1_vi.txt: 0.361673
+M3ED_deio_spot_indoor_building_loop_trial_2_vi.txt: 0.942766
+M3ED_deio_spot_indoor_building_loop_trial_3_vi.txt: 1.416981
+M3ED_deio_spot_indoor_building_loop_trial_4_vi.txt: 1.805758
+M3ED_deio_spot_indoor_building_loop_trial_5_vi.txt: 0.379362
+M3ED_deio_spot_indoor_building_loop_trial_6_vi.txt: 2.282755
+M3ED_deio_spot_indoor_building_loop_trial_7_vi.txt: 1.710354
+M3ED_deio_spot_indoor_building_loop_trial_8_vi.txt: 0.542696
+M3ED_deio_spot_indoor_building_loop_trial_9_vi.txt: 11.041467
+AVERAGE: 2.2242965000000003
+
+////////////////////////////////////
+# APE RMSE SUMMARY
+# GT: /home/bora/m3ed/m3ed/spot_outdoor_night_penno_short_loop/spot_outdoor_night_penno_short_loop_pose_evo_gt.txt
+# t_max: 0.5
+
+## DVIO (vio)
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_0.txt: 0.424135
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_1.txt: 0.450299
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_2.txt: 0.492029
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_3.txt: 0.485628
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_4.txt: 0.573811
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_5.txt: 0.459174
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_6.txt: 0.505594
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_7.txt: 0.503968
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_8.txt: 0.432244
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_9.txt: 0.592888
+AVERAGE: 0.491977
+
+## DVIO (visual_only)
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_0_vi.txt: 0.413385
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_1_vi.txt: 0.428822
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_2_vi.txt: 0.395481
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_3_vi.txt: 0.457442
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_4_vi.txt: 0.559748
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_5_vi.txt: 0.438261
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_6_vi.txt: 0.474388
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_7_vi.txt: 0.484076
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_8_vi.txt: 0.423076
+M3ED_dvio_spot_outdoor_night_penno_short_loop_trial_9_vi.txt: 0.580997
+AVERAGE: 0.46556759999999997
+
+## DEIO (vio)
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_0.txt: 22.082809
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_1.txt: 23.446321
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_2.txt: 24.513591
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_3.txt: 33.860755
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_4.txt: 21.411833
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_5.txt: 35.570259
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_6.txt: 17.638787
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_7.txt: 22.169219
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_8.txt: 15.389238
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_9.txt: 16.111986
+AVERAGE: 23.2194798
+
+## DEIO (visual_only)
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_0_vi.txt: 21.866323
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_1_vi.txt: 23.171395
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_2_vi.txt: 24.253385
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_3_vi.txt: 33.477633
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_4_vi.txt: 21.237674
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_5_vi.txt: 35.177751
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_6_vi.txt: 17.425385
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_7_vi.txt: 21.905087
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_8_vi.txt: 15.206972
+M3ED_deio_spot_outdoor_night_penno_short_loop_trial_9_vi.txt: 15.966284
+AVERAGE: 22.9687889
+
+///////////////////////////////////////////////////77
+
+# APE RMSE SUMMARY
+# GT: /home/bora/m3ed/m3ed/spot_outdoor_day_penno_short_loop/spot_outdoor_day_penno_short_loop_pose_evo_gt.txt
+# t_max: 0.5
+
+## DVIO (vio)
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_0.txt: 0.609201
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_1.txt: 0.532829
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_2.txt: 0.619381
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_3.txt: 0.610315
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_4.txt: 0.631365
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_5.txt: 0.649912
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_6.txt: 0.62444
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_7.txt: 0.551359
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_8.txt: 0.627701
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_9.txt: 0.527482
+AVERAGE: 0.5983984999999999
+
+## DVIO (visual_only)
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_0_vi.txt: 0.60342
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_1_vi.txt: 0.524006
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_2_vi.txt: 0.608854
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_3_vi.txt: 0.606728
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_4_vi.txt: 0.627517
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_5_vi.txt: 0.640649
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_6_vi.txt: 0.612175
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_7_vi.txt: 0.543062
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_8_vi.txt: 0.620344
+M3ED_dvio_spot_outdoor_day_penno_short_loop_trial_9_vi.txt: 0.519146
+AVERAGE: 0.5905901
+
+## DEIO (vio)
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_0.txt: 1.525204
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_1.txt: 1.490188
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_2.txt: 3.469711
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_3.txt: 0.946881
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_4.txt: 1.672418
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_5.txt: 0.822457
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_6.txt: 1.146577
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_7.txt: 4.171092
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_8.txt: 1.01676
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_9.txt: 0.875763
+AVERAGE: 1.7137050999999999
+
+## DEIO (visual_only)
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_0_vi.txt: 1.513841
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_1_vi.txt: 1.487943
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_2_vi.txt: 3.443123
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_3_vi.txt: 0.92509
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_4_vi.txt: 1.644876
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_5_vi.txt: 0.793431
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_6_vi.txt: 1.093847
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_7_vi.txt: 4.094925
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_8_vi.txt: 1.015043
+M3ED_deio_spot_outdoor_day_penno_short_loop_trial_9_vi.txt: 0.867702
+AVERAGE: 1.6879821
+
+

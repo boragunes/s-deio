@@ -1,0 +1,19 @@
+COMMAND:
+evo_ape tum -a /home/bora/m3ed/m3ed/spot_outdoor_day_srt_under_bridge_1/spot_outdoor_day_srt_under_bridge_1_pose_evo_gt.txt saved_trajectories/M3ED_dvio_spot_outdoor_day_srt_under_bridge_1_trial_3.txt --t_max 0.1 --t_start 5
+
+STDOUT:
+Using time range start: 5.0s
+APE w.r.t. translation part (m)
+(with SE(3) Umeyama alignment)
+
+       max	1.004363
+      mean	0.521442
+    median	0.501190
+       min	0.107771
+      rmse	0.579965
+       sse	633.700325
+       std	0.253884
+
+
+RETURN_CODE: 0
+PARSED_RMSE: 0.579965

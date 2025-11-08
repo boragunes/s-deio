@@ -1,0 +1,19 @@
+COMMAND:
+evo_ape tum -a /home/bora/m3ed/m3ed/spot_indoor_building_loop/spot_indoor_building_loop_pose_evo_gt.txt saved_trajectories/M3ED_dvio_spot_indoor_building_loop_trial_1_vi.txt --t_max 0.1 --t_start 5
+
+STDOUT:
+Using time range start: 5.0s
+APE w.r.t. translation part (m)
+(with SE(3) Umeyama alignment)
+
+       max	0.127183
+      mean	0.059627
+    median	0.065327
+       min	0.003225
+      rmse	0.065720
+       sse	4.189489
+       std	0.027635
+
+
+RETURN_CODE: 0
+PARSED_RMSE: 0.06572
