@@ -180,6 +180,7 @@ class DEIO:
         # X, Y
         self.refTw = np.eye(4, 4)
         self.poses_save = []
+        self.poses_save_vi = []
         # Record poses
 
     # Used to set prior_factor_map
@@ -322,11 +323,13 @@ class DEIO:
         else:
             # Get tstamps and poses from self.poses_save. The first element of each row in self.poses_save is the time, and the other seven are the pose
             poses = np.array(self.poses_save)[:, 1:]
+            poses_vi = np.array(self.poses_save_vi)[:, 1:]
             # Get timestamps
             tstamps = np.array(self.poses_save, dtype=np.float64)[:, 0]
+            tstamps_vi = np.array(self.poses_save_vi, dtype=np.float64)[:, 0]
 
         # Poses: x y z qx qy qz qw
-        return poses, tstamps
+        return poses, tstamps, poses_vi, tstamps_vi
 
     def corr(self, coords, indicies=None):
         """local correlation volume"""
@@ -538,6 +541,7 @@ class DEIO:
         full_ii = torch.cat((self.pg.ii_inac, self.pg.ii))
         full_jj = torch.cat((self.pg.jj_inac, self.pg.jj))
         full_kk = torch.cat((self.pg.kk_inac, self.pg.kk))
+        self.pg.normalize()
 
         lmbda = torch.as_tensor([1e-4], device="cuda")
         t0 = self.pg.ii.min().item()
@@ -568,7 +572,7 @@ class DEIO:
         self.last_t0 = t0
         self.last_t1 = self.n
 
-    def __run_DBA(self, target, weight, lmbda, ii, jj, kk, t0, t1, eff_impl):
+    def __run_DBA(self, target, weight, target_s, weight_s, lmbda, ii, jj, kk, t0, t1, eff_impl):
         """Perform marginalization"""
         if self.last_t1 != t1 or self.last_t0 != t0:
             if self.last_t0 >= t0:
@@ -776,8 +780,8 @@ class DEIO:
         self.cur_kk = kk  # [active_index]
         self.cur_target = target  # [:,active_index]
         self.cur_weight = weight  # [:,active_index]
-        self.cur_target_s = target  # [:,active_index]
-        self.cur_weight_s = weight  # [:,active_index]
+        self.cur_target_s = target_s  # [:,active_index]
+        self.cur_weight_s = weight_s  # [:,active_index]
 
         # Next, start building visual constraint factors and put them into the gtsam graph
         H = torch.zeros(
@@ -788,11 +792,14 @@ class DEIO:
         # Used to get the gtsam result and update dba
 
         bafactor = fastba.BAFactor()
+        
+        poses_data_copy = self.poses.data.clone().detach().contiguous()
+        patches_copy    = self.patches.clone().detach().contiguous()
         # Initialize the class, ready to build visual factors
         # Perform initialization
         bafactor.init(
-            self.poses.data,
-            self.patches,
+            poses_data_copy,
+            patches_copy,
             self.intrinsics,
             self.intrinsics_s,
             self.extrinsics,
@@ -824,12 +831,41 @@ class DEIO:
             vg = Hgg[0 : (t1 - t0) * 6, (t1 - t0) * 6]
 
             initial = gtsam.Values()
+            # for i in range(t0, t1):
+            #     # Give initial values for the 
+            #     initial.insert(X(i), self.state.wTbs[i])
+                
+            #initial_vis = copy.deepcopy(initial)
+
+            if self.Tbc is None:
+                raise RuntimeError(
+                    "IMU-camera extrinsics Tbc must be set before running IMU fusion."
+                )
+
+            Tcb = self.Tbc.inverse().matrix()
             for i in range(t0, t1):
-                # Give initial values for the states
-                initial.insert(X(i), self.state.wTbs[i])
-                # the indice need to be handled
-            initial_vis = copy.deepcopy(initial)
-            vis_factor = CustomHessianFactor(initial_vis, Hg, vg)
+                pose_tensor = self.pg.poses_[i]
+                pose_np = pose_tensor.detach().cpu().numpy()
+                t_cam_world = pose_np[:3]
+                q_cam_world = pose_np[3:]
+
+                cTw = np.eye(4, dtype=np.float64)
+                cTw[:3, :3] = Rotation.from_quat(q_cam_world).as_matrix()
+                cTw[:3, 3] = t_cam_world
+
+                wTc = np.linalg.inv(cTw)
+                wTb = wTc @ Tcb
+
+                rot_wTb = Rotation.from_matrix(wTb[:3, :3]).as_quat()
+                pose_body = gtsam.Pose3(
+                    gtsam.Rot3.Quaternion(
+                        rot_wTb[3], rot_wTb[0], rot_wTb[1], rot_wTb[2]
+                    ),
+                    gtsam.Point3(*wTb[:3, 3]),
+                )
+                initial.insert(X(i), pose_body)
+
+            vis_factor = CustomHessianFactor(initial, Hg, vg)
             self.cur_graph.push_back(vis_factor)
             # Build visual factors based on the droid result
 
@@ -839,13 +875,26 @@ class DEIO:
                     initial.insert(B(i), self.state.bs[i])
                     initial.insert(V(i), self.state.vs[i])
 
+            
+            print("DBG total cost BEFORE:", self.cur_graph.error(initial))
             optimizer = gtsam.LevenbergMarquardtOptimizer(
                 self.cur_graph, initial, params
             )
             # Initialize gtsam optimizer
             self.cur_result = optimizer.optimize()
+            xi = gtsam.Pose3.Logmap(initial.atPose3(X(i)).inverse() * self.cur_result.atPose3(X(i)))
+            print(f"norm step X({i}) = {np.linalg.norm(xi)}")
+            
             # Optimize using gtsam
-
+            print("DBG total cost AFTER:", self.cur_graph.error(self.cur_result))
+            # >>> DBG: per-factor
+            for f_i in range(self.cur_graph.size()):
+                f = self.cur_graph.at(f_i)
+                try:
+                    e = f.error(self.cur_result)
+                except Exception:
+                    e = None
+                print(f"DBG factor {f_i}: {type(f)} -> {e}")
             # retraction and depth update
             for i in range(t0, t1):
                 p0 = initial.atPose3(X(i))
@@ -910,6 +959,8 @@ class DEIO:
                         full_weight = torch.cat(
                             (self.pg.weight_inac, self.pg.weight), dim=1
                         )
+                        full_target_s = torch.cat((self.pg.target_s_inac, self.pg.target_s), dim=1)
+                        full_weight_s = torch.cat((self.pg.weight_s_inac, self.pg.weight_s), dim=1)
                         full_ii = torch.cat((self.pg.ii_inac, self.pg.ii))
                         full_jj = torch.cat((self.pg.jj_inac, self.pg.jj))
                         full_kk = torch.cat((self.pg.kk_inac, self.pg.kk))
@@ -918,21 +969,46 @@ class DEIO:
                         self.ran_global_ba[self.n] = True
                     else:
                         # Run local BA optimization
-                        t0 = (
-                            self.n - self.cfg.OPTIMIZATION_WINDOW
-                            if self.is_initialized
-                            else 1
-                        )
-                        t0 = max(t0, 1)
                         full_target = self.pg.target
                         full_weight = self.pg.weight
+                        full_target_s = self.pg.target_s
+                        full_weight_s = self.pg.weight_s
                         full_ii = self.pg.ii
                         full_jj = self.pg.jj
                         full_kk = self.pg.kk
                         eff_impl_flag = False
+                        t0 = max(self.n - self.cfg.OPTIMIZATION_WINDOW if self.is_initialized else 1, 1)
+                        if t1 - t0 < 2:
+                            # guard against degenerate window; expand minimally
+                            t0 = max(0, t1 - 2)
+                            
+                        fastba.BA(
+                            self.poses.data,
+                            self.patches,
+                            self.intrinsics,
+                            self.intrinsics_s,
+                            self.extrinsics,
+                            full_target,
+                            full_weight,
+                            full_target_s,
+                            full_weight_s,
+                            lmbda,
+                            full_ii,
+                            full_jj,
+                            full_kk,
+                            t0,
+                            self.n,
+                            M=self.M,
+                            iterations=2,
+                            eff_impl=False,
+                            stereo=self.stereo,
+                        )
+                        
                     self.__run_DBA(
                         target=full_target,
                         weight=full_weight,
+                        target_s=full_target_s,
+                        weight_s=full_weight_s,
                         lmbda=lmbda,
                         ii=full_ii,
                         jj=full_jj,
@@ -941,6 +1017,9 @@ class DEIO:
                         t1=t1,
                         eff_impl=eff_impl_flag,
                     )
+                    
+                    self.last_t0 = t0
+                    self.last_t1 = t1
                 else:
                     if (
                         self.pg.ii < self.n - self.cfg.REMOVAL_WINDOW - 1
@@ -954,7 +1033,7 @@ class DEIO:
                         )
                         t0 = max(t0, 1)
                         fastba.BA(
-                            self.poses,
+                            self.poses.data,
                             self.patches,
                             self.intrinsics,
                             self.intrinsics_s,
@@ -1192,9 +1271,9 @@ class DEIO:
             self.state.preintegrations[i] = pim
             self.state.bs[i] = gtsam.imuBias.ConstantBias(np.array([0.0, 0.0, 0.0]), bg)
 
-        # linearAlignment
+                # linearAlignment
         all_frame_count = t1 - t0
-        n_state = all_frame_count * 3 + 3 + 1
+        n_state = all_frame_count * 3 + 3 # + 1
         A = np.zeros([n_state, n_state])
         b = np.zeros(n_state)
         i_count = 0
@@ -1208,12 +1287,12 @@ class DEIO:
             pim = self.state.preintegrations[i]
             # tic = self.Tbc.translation()
 
-            tmp_A = np.zeros([6, 10])
+            tmp_A = np.zeros([6, 9])
             tmp_b = np.zeros(6)
             dt = pim.deltaTij()
             tmp_A[0:3, 0:3] = -dt * np.eye(3, 3)
             tmp_A[0:3, 6:9] = R_i.T * dt * dt / 2
-            tmp_A[0:3, 9] = np.matmul(R_i.T, t_j - t_i) / 100.0
+            # tmp_A[0:3, 9] = np.matmul(R_i.T, t_j - t_i) / 100.0
             tmp_b[0:3] = pim.deltaPij()
             tmp_A[3:6, 0:3] = -np.eye(3, 3)
             tmp_A[3:6, 3:6] = np.matmul(R_i.T, R_j)
@@ -1227,25 +1306,25 @@ class DEIO:
                 0:6, 0:6
             ]
             b[i_count * 3 : i_count * 3 + 6] += r_b[0:6]
-            A[-4:, -4:] += r_A[-4:, -4:]
-            b[-4:] += r_b[-4:]
+            A[-3:, -3:] += r_A[-3:, -3:]
+            b[-3:] += r_b[-3:]
 
-            A[i_count * 3 : i_count * 3 + 6, n_state - 4 :] += r_A[0:6, -4:]
-            A[n_state - 4 :, i_count * 3 : i_count * 3 + 6] += r_A[-4:, 0:6]
+            A[i_count * 3 : i_count * 3 + 6, n_state - 3 :] += r_A[0:6, -3:]
+            A[n_state - 3 :, i_count * 3 : i_count * 3 + 6] += r_A[-3:, 0:6]
             i_count += 1
 
         A = A * 1000.0
         b = b * 1000.0
         x = np.matmul(np.linalg.inv(A), b)
-        s = x[n_state - 1] / 100.0
+        # s = x[n_state - 1] / 100.0
 
-        g = x[-4:-1]
+        g = x[-3:]
 
         # RefineGravity
         g0 = g / np.linalg.norm(g) * 9.81
         # lx = np.zeros(3)
         # ly = np.zeros(3)
-        n_state = all_frame_count * 3 + 2 + 1
+        n_state = all_frame_count * 3 + 2 # + 1
         A = np.zeros([n_state, n_state])
         b = np.zeros(n_state)
 
@@ -1269,14 +1348,14 @@ class DEIO:
                 t_i = pose_i.translation()
                 R_j = pose_j.rotation().matrix()
                 t_j = pose_j.translation()
-                tmp_A = np.zeros([6, 9])
+                tmp_A = np.zeros([6, 8])
                 tmp_b = np.zeros(6)
                 pim = self.state.preintegrations[i]
                 dt = pim.deltaTij()
 
                 tmp_A[0:3, 0:3] = -dt * np.eye(3, 3)
                 tmp_A[0:3, 6:8] = np.matmul(R_i.T, lxly) * dt * dt / 2
-                tmp_A[0:3, 8] = np.matmul(R_i.T, t_j - t_i) / 100.0
+                # tmp_A[0:3, 8] = np.matmul(R_i.T, t_j - t_i) / 100.0
                 tmp_b[0:3] = pim.deltaPij() - np.matmul(R_i.T, g0) * dt * dt / 2
 
                 tmp_A[3:6, 0:3] = -np.eye(3)
@@ -1291,20 +1370,20 @@ class DEIO:
                     0:6, 0:6
                 ]
                 b[i_count * 3 : i_count * 3 + 6] += r_b[0:6]
-                A[-3:, -3:] += r_A[-3:, -3:]
-                b[-3:] += r_b[-3:]
+                A[-2:, -2:] += r_A[-2:, -2:]
+                b[-2:] += r_b[-2:]
 
-                A[i_count * 3 : i_count * 3 + 6, n_state - 3 :] += r_A[0:6, -3:]
-                A[n_state - 3 :, i_count * 3 : i_count * 3 + 6] += r_A[-3:, 0:6]
+                A[i_count * 3 : i_count * 3 + 6, n_state - 2 :] += r_A[0:6, -2:]
+                A[n_state - 2 :, i_count * 3 : i_count * 3 + 6] += r_A[-2:, 0:6]
                 i_count += 1
 
             A = A * 1000.0
             b = b * 1000.0
             x = np.matmul(np.linalg.inv(A), b)
-            dg = x[-3:-1]
+            dg = x[-2:]
             g0 = g0 + np.matmul(lxly, dg)
             g0 = g0 / np.linalg.norm(g0) * 9.81
-            s = x[-1] / 100.0
+            # s = x[-1] / 100.0
 
         if disable_scale:
             s = 1.0
@@ -1493,27 +1572,19 @@ class DEIO:
         self.cur_imu_ii += 1
 
         ## predict pose (<5 ms)
-        if self.imu_enabled:
-            # If IMU is used
-            Twc = (self.state.wTbs[-1] * self.Tbc).matrix()
-            # The latest Twb*Tbc
-            TTT = torch.tensor(np.linalg.inv(Twc))
-            # Get its inverse, which is Tcw
-            q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
-            # Get the quaternion
-            t = TTT[:3, 3]
-            self.pg.poses_[self.t1 - 1] = torch.cat([t, q])
-            # Initialize the current pose
+        ###i deleted this 
 
         self.update()
         # Perform update operation
 
         # Save and output the pose result
-        poses = SE3(self.pg.poses_)
+        
+        poses_vi = SE3(self.pg.poses_)
         # Get pose
-        TTT = np.matmul(
-            poses[self.t1 - 1].cpu().inv().matrix(), np.linalg.inv(self.Ti1c)
+        TTT_vi = np.matmul(
+            poses_vi[self.t1 - 1].cpu().inv().matrix(), np.linalg.inv(self.Ti1c)
         )
+        TTT = self.state.wTbs[self.t1 - 1].matrix()
         # Get the latest frame and convert to body frame
         # If IMU is used or only visual is used and it has been initialized
         if self.imu_enabled or (self.visual_only and self.visual_only_init):
@@ -1521,6 +1592,11 @@ class DEIO:
             qqq = Rotation.from_matrix(TTT[:3, :3]).as_quat()
             self.poses_save.append(
                 [cur_t, ppp[0], ppp[1], ppp[2], qqq[0], qqq[1], qqq[2], qqq[3]]
+            )
+            ppp_vi = TTT_vi[0:3, 3]
+            qqq_vi = Rotation.from_matrix(TTT_vi[:3, :3]).as_quat()
+            self.poses_save_vi.append(
+                [cur_t, ppp_vi[0], ppp_vi[1], ppp_vi[2], qqq_vi[0], qqq_vi[1], qqq_vi[2], qqq_vi[3]]
             )
             # Save the current pose to the list, #x,y,z xyzw
 
