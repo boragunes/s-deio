@@ -1,5 +1,7 @@
 import copy
+import csv
 import math
+from pathlib import Path
 
 import gtsam
 import numpy as np
@@ -86,7 +88,19 @@ class DVIO:
         self.gmap_ = torch.zeros(self.pmem, self.M, 128, self.P, self.P, **kwargs)
 
         self.pg = PatchGraph(self.cfg, self.P, self.DIM, self.pmem, **kwargs)
+        self._init_patch_depth_logging()
 
+        
+        #---------- IMU bias logging ----------
+        # Set IMU_BIAS_LOG_FILE in cfg to control the output file.
+        # If set to "" or None, bias logging is disabled.
+        bias_log_file = getattr(self.cfg, "IMU_BIAS_LOG_FILE", "imu_biases.csv")
+        self.bias_log_path = Path(bias_log_file) if bias_log_file else None
+        self._bias_header_written = False
+        # --------------------------------------
+        
+        
+        
         # classic backend
         if self.cfg.CLASSIC_LOOP_CLOSURE:
             self.load_long_term_loop_closure()
@@ -108,7 +122,7 @@ class DVIO:
             self.start_viewer()
 
         ### event-based DBA (all times should have been offset by a time offset)
-        self.state = MultiSensorState()
+        self.state = MultiSensorState(self.cfg)
         # Pose estimation state
         self.last_t0 = 0  # t0 of the previous frame
         self.last_t1 = 0  # t1 of the previous frame
@@ -142,8 +156,8 @@ class DVIO:
         self.vi_warmup = self.cfg.VI_WARM_UP_N
         # The visual warmup starts initialization after 12 frames
         self.init_pose_sigma = np.array([0.1, 0.1, 0.0001, 0.0001, 0.0001, 0.0001])
+        #self.init_bias_sigma = np.array([5e-2, 5e-2, 5e-2, 5e-3, 5e-3, 5e-3])
         self.init_bias_sigma = np.array([1.0, 1.0, 1.0, 0.1, 0.1, 0.1])
-
         # local optimization window
         # Starting frame index
         self.t0 = 0
@@ -169,7 +183,6 @@ class DVIO:
         # X, Y
         self.refTw = np.eye(4, 4)
         self.poses_save = []
-        self.poses_save_vi = []
         # Record poses
 
     # Used to set prior_factor_map
@@ -300,14 +313,11 @@ class DVIO:
         else:
             # Get tstamps and poses from self.poses_save. The first element of each row in self.poses_save is the time, and the other seven are the pose
             poses = np.array(self.poses_save)[:, 1:]
-            poses_vi = np.array(self.poses_save_vi)[:, 1:]
             # Get timestamps
             tstamps = np.array(self.poses_save, dtype=np.float64)[:, 0]
-            tstamps_vi = np.array(self.poses_save_vi, dtype=np.float64)[:, 0]
-
 
         # Poses: x y z qx qy qz qw
-        return poses, tstamps, poses_vi, tstamps_vi
+        return poses, tstamps
 
     def corr(self, coords, indicies=None):
         """local correlation volume"""
@@ -520,7 +530,7 @@ class DVIO:
         full_ii = torch.cat((self.pg.ii_inac, self.pg.ii))
         full_jj = torch.cat((self.pg.jj_inac, self.pg.jj))
         full_kk = torch.cat((self.pg.kk_inac, self.pg.kk))
-        self.pg.normalize()
+
         lmbda = torch.as_tensor([1e-4], device="cuda")
         t0 = self.pg.ii.min().item()
         fastba.BA(
@@ -550,7 +560,7 @@ class DVIO:
         self.last_t0 = t0
         self.last_t1 = self.n
 
-    def __run_DBA(self, target, weight, target_s, weight_s, lmbda, ii, jj, kk, t0, t1, eff_impl):
+    def __run_DBA(self, target, weight,target_s,weight_s, lmbda, ii, jj, kk, t0, t1, eff_impl):
         """Perform marginalization"""
         if self.last_t1 != t1 or self.last_t0 != t0:
             if self.last_t0 >= t0:
@@ -770,15 +780,11 @@ class DVIO:
         # Used to get the gtsam result and update dba
 
         bafactor = fastba.BAFactor()
-        
-        poses_data_copy = self.poses.data.clone().detach().contiguous()
-        patches_copy    = self.patches.clone().detach().contiguous()
-                
         # Initialize the class, ready to build visual factors
         # Perform initialization
         bafactor.init(
-            poses_data_copy,
-            patches_copy,
+            self.poses.data,
+            self.patches,
             self.intrinsics,
             self.intrinsics_s,
             self.extrinsics,
@@ -810,39 +816,12 @@ class DVIO:
             vg = Hgg[0 : (t1 - t0) * 6, (t1 - t0) * 6]
 
             initial = gtsam.Values()
-            # for i in range(t0, t1):
-            #     # Give initial values for the states based on fused (IMU) estimate
-            #     initial.insert(X(i), self.state.wTbs[i])
-
-            if self.Tbc is None:
-                raise RuntimeError(
-                    "IMU-camera extrinsics Tbc must be set before running IMU fusion."
-                )
-
-            Tcb = self.Tbc.inverse().matrix()
-            
             for i in range(t0, t1):
-                pose_tensor = self.pg.poses_[i]
-                pose_np = pose_tensor.detach().cpu().numpy()
-                t_cam_world = pose_np[:3]
-                q_cam_world = pose_np[3:]
-
-                cTw = np.eye(4, dtype=np.float64)
-                cTw[:3, :3] = Rotation.from_quat(q_cam_world).as_matrix()
-                cTw[:3, 3] = t_cam_world
-
-                wTc = np.linalg.inv(cTw)
-                wTb = wTc @ Tcb
-
-                rot_wTb = Rotation.from_matrix(wTb[:3, :3]).as_quat()
-                pose_body = gtsam.Pose3(
-                    gtsam.Rot3.Quaternion(
-                        rot_wTb[3], rot_wTb[0], rot_wTb[1], rot_wTb[2]
-                    ),
-                    gtsam.Point3(*wTb[:3, 3]),
-                )
-                initial.insert(X(i), pose_body)
-            vis_factor = CustomHessianFactor(initial, Hg, vg)
+                # Give initial values for the states
+                initial.insert(X(i), self.state.wTbs[i])
+                # the indice need to be handled
+            initial_vis = copy.deepcopy(initial)
+            vis_factor = CustomHessianFactor(initial_vis, Hg, vg)
             self.cur_graph.push_back(vis_factor)
             # Build visual factors based on the droid result
 
@@ -852,25 +831,24 @@ class DVIO:
                     initial.insert(B(i), self.state.bs[i])
                     initial.insert(V(i), self.state.vs[i])
 
-            print("DBG total cost BEFORE:", self.cur_graph.error(initial))
             optimizer = gtsam.LevenbergMarquardtOptimizer(
                 self.cur_graph, initial, params
             )
             # Initialize gtsam optimizer
+           # print("DBG total cost BEFORE:", self.cur_graph.error(initial))
             self.cur_result = optimizer.optimize()
-            xi = gtsam.Pose3.Logmap(initial.atPose3(X(i)).inverse() * self.cur_result.atPose3(X(i)))
-            print(f"norm step X({i}) = {np.linalg.norm(xi)}")
             # Optimize using gtsam
-            print("DBG total cost AFTER:", self.cur_graph.error(self.cur_result))
-            
+            #print("DBG total cost AFTER:", self.cur_graph.error(self.cur_result))
             # >>> DBG: per-factor
-            for f_i in range(self.cur_graph.size()):
-                f = self.cur_graph.at(f_i)
-                try:
-                    e = f.error(self.cur_result)
-                except Exception:
-                    e = None
-                print(f"DBG factor {f_i}: {type(f)} -> {e}")
+            # for f_i in range(self.cur_graph.size()):
+            #     f = self.cur_graph.at(f_i)
+            #     try:
+            #         e = f.error(self.cur_result)
+            #     except Exception:
+            #         e = None
+            #     print(f"DBG factor {f_i}: {type(f)} -> {e}")
+            # Optimize using gtsam
+
             # retraction and depth update
             for i in range(t0, t1):
                 p0 = initial.atPose3(X(i))
@@ -935,9 +913,6 @@ class DVIO:
                         full_weight = torch.cat(
                             (self.pg.weight_inac, self.pg.weight), dim=1
                         )
-                        
-                        full_target_s = torch.cat((self.pg.target_s_inac, self.pg.target_s), dim=1)
-                        full_weight_s = torch.cat((self.pg.weight_s_inac, self.pg.weight_s), dim=1)
                         full_ii = torch.cat((self.pg.ii_inac, self.pg.ii))
                         full_jj = torch.cat((self.pg.jj_inac, self.pg.jj))
                         full_kk = torch.cat((self.pg.kk_inac, self.pg.kk))
@@ -946,6 +921,12 @@ class DVIO:
                         self.ran_global_ba[self.n] = True
                     else:
                         # Run local BA optimization
+                        t0 = (
+                            self.n - self.cfg.OPTIMIZATION_WINDOW
+                            if self.is_initialized
+                            else 1
+                        )
+                        t0 = max(t0, 1)
                         full_target = self.pg.target
                         full_weight = self.pg.weight
                         full_target_s = self.pg.target_s
@@ -954,34 +935,6 @@ class DVIO:
                         full_jj = self.pg.jj
                         full_kk = self.pg.kk
                         eff_impl_flag = False
-                         # --- VO-only refinement on visual tensors (keeps visual loop pure) ---
-
-                        t0 = max(self.n - self.cfg.OPTIMIZATION_WINDOW if self.is_initialized else 1, 1)
-                        if t1 - t0 < 2:
-                            # guard against degenerate window; expand minimally
-                            t0 = max(0, t1 - 2)
-                    fastba.BA(
-                            self.poses.data,
-                            self.patches,
-                            self.intrinsics,
-                            self.intrinsics_s,
-                            self.extrinsics,
-                            full_target,
-                            full_weight,
-                            full_target_s,
-                            full_weight_s,
-                            lmbda,
-                            full_ii,
-                            full_jj,
-                            full_kk,
-                            t0,
-                            self.n,
-                            M=self.M,
-                            iterations=2,
-                            eff_impl=False,
-                            stereo=self.stereo,
-                        )
-                    
                     self.__run_DBA(
                         target=full_target,
                         weight=full_weight,
@@ -995,8 +948,6 @@ class DVIO:
                         t1=t1,
                         eff_impl=eff_impl_flag,
                     )
-                    self.last_t0 = t0
-                    self.last_t1 = t1
                 else:
                     if (
                         self.pg.ii < self.n - self.cfg.REMOVAL_WINDOW - 1
@@ -1010,7 +961,7 @@ class DVIO:
                         )
                         t0 = max(t0, 1)
                         fastba.BA(
-                            self.poses.data,
+                            self.poses,
                             self.patches,
                             self.intrinsics,
                             self.intrinsics_s,
@@ -1091,6 +1042,232 @@ class DVIO:
             indexing="ij",
         )
 
+    def _init_patch_depth_logging(self):
+        self.enable_patch_depth_logging = bool(
+            getattr(self.cfg, "LOG_PATCH_DEPTHS", False)
+        )
+        self.patch_depth_log_path = None
+        self.patch_depth_index_filter = set()
+        self.patch_depth_coord_filter = []
+        self.patch_depth_pixel_tol = float(
+            getattr(self.cfg, "PATCH_DEPTH_PIXEL_TOL", 2.0)
+        )
+        self._patch_depth_header_written = False
+
+        if not self.enable_patch_depth_logging:
+            return
+
+        log_file = getattr(self.cfg, "PATCH_DEPTH_LOG_FILE", "") or "patch_depths.csv"
+        self.patch_depth_log_path = Path(log_file)
+
+        valid_ids = set()
+        for idx in getattr(self.cfg, "PATCH_DEPTH_FILTER_IDS", []):
+            try:
+                val = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= val < self.M:
+                valid_ids.add(val)
+        self.patch_depth_index_filter = valid_ids
+
+        coord_filters = []
+        for entry in getattr(self.cfg, "PATCH_DEPTH_FILTER_PIXELS", []):
+            if isinstance(entry, dict):
+                if "x" in entry and "y" in entry:
+                    coord_filters.append((float(entry["x"]), float(entry["y"])))
+            elif isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                coord_filters.append((float(entry[0]), float(entry[1])))
+        self.patch_depth_coord_filter = coord_filters
+
+    def _frame_timestamp(self, frame_idx):
+        if frame_idx < 0 or frame_idx >= self.n:
+            return None
+        stamp_idx = int(self.pg.tstamps_[frame_idx].item())
+        if 0 <= stamp_idx < len(self.tlist):
+            return float(self.tlist[stamp_idx])
+        return None
+
+    def _should_log_patch(self, local_idx, x_px, y_px):
+        if self.patch_depth_index_filter and local_idx not in self.patch_depth_index_filter:
+            return False
+
+        if self.patch_depth_coord_filter:
+            tol_sq = self.patch_depth_pixel_tol * self.patch_depth_pixel_tol
+            for cx, cy in self.patch_depth_coord_filter:
+                dx = x_px - cx
+                dy = y_px - cy
+                if dx * dx + dy * dy <= tol_sq:
+                    return True
+            return False
+
+        return True
+
+    def _write_patch_depth_rows(self, rows):
+        if not rows or self.patch_depth_log_path is None:
+            return
+
+        path = self.patch_depth_log_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_header = (not self._patch_depth_header_written) or (not path.exists())
+
+        with path.open("a", newline="") as handle:
+            writer = csv.writer(handle)
+            if write_header:
+                writer.writerow(
+                    [
+                        "timestamp",
+                        "frame_graph_idx",
+                        "stamp_idx",
+                        "patch_local_idx",
+                        "x_feat",
+                        "y_feat",
+                        "x_px",
+                        "y_px",
+                        "inv_depth",
+                        "depth",
+                    ]
+                )
+                self._patch_depth_header_written = True
+
+            writer.writerows(rows)
+
+    def _maybe_log_patch_depths(self, frame_idx, timestamp=None):
+        if not self.enable_patch_depth_logging or self.n == 0:
+            return
+
+        if frame_idx < 0 or frame_idx >= self.n:
+            return
+
+        if timestamp is None:
+            timestamp = self._frame_timestamp(frame_idx)
+
+        if timestamp is None:
+            return
+
+        center = self.P // 2
+        patch_center = (
+            self.pg.patches_[frame_idx, :, :, center, center].detach().cpu()
+        )
+        coords = patch_center[:, :2]
+        inv_depths = patch_center[:, 2]
+        stamp_idx = int(self.pg.tstamps_[frame_idx].item())
+
+        rows = []
+        res = float(self.RES)
+        for local_idx in range(coords.shape[0]):
+            x_feat = float(coords[local_idx, 0])
+            y_feat = float(coords[local_idx, 1])
+            x_px = x_feat * res
+            y_px = y_feat * res
+
+            if not self._should_log_patch(local_idx, x_px, y_px):
+                continue
+
+            inv_depth_val = float(inv_depths[local_idx])
+            depth_val = ""
+            if math.isfinite(inv_depth_val) and abs(inv_depth_val) > 1e-6:
+                depth_val = 1.0 / inv_depth_val
+
+            rows.append(
+                [
+                    timestamp,
+                    frame_idx,
+                    stamp_idx,
+                    local_idx,
+                    x_feat,
+                    y_feat,
+                    x_px,
+                    y_px,
+                    inv_depth_val,
+                    depth_val,
+                ]
+            )
+
+        self._write_patch_depth_rows(rows)
+        
+    def _log_bias_state(self, frame_idx, timestamp):
+        """
+        Log current accelerometer and gyroscope biases for the given frame.
+
+        Parameters
+        ----------
+        frame_idx : int
+            Index in pose / bias arrays (0-based).
+        timestamp : float
+            Timestamp (same units as self.tlist, e.g. seconds).
+        """
+        # Logging can be disabled by setting IMU_BIAS_LOG_FILE = "" in cfg.
+        if self.bias_log_path is None:
+            return
+
+        # Safety checks
+        if frame_idx < 0:
+            return
+        if not hasattr(self.state, "bs") or frame_idx >= len(self.state.bs):
+            return
+
+        bias = self.state.bs[frame_idx]
+        if bias is None:
+            return
+
+        # Extract accel / gyro biases from gtsam.imuBias.ConstantBias
+        try:
+            acc = bias.accelerometer()
+            gyro = bias.gyroscope()
+            acc_vec = np.array([acc.x(), acc.y(), acc.z()], dtype=float)
+            gyro_vec = np.array([gyro.x(), gyro.y(), gyro.z()], dtype=float)
+        except AttributeError:
+            # Fallback: use 6D vector ordering [ax, ay, az, gx, gy, gz]
+            vec = np.array(bias.vector(), dtype=float).reshape(-1)
+            acc_vec = vec[:3]
+            gyro_vec = vec[3:6]
+
+        bg_norm = float(np.linalg.norm(gyro_vec))
+        ba_norm = float(np.linalg.norm(acc_vec))
+
+        # Frame's index into tlist (same convention as pose logging)
+        stamp_idx = -1
+        try:
+            if 0 <= frame_idx < len(self.pg.tstamps_):
+                stamp_idx = int(self.pg.tstamps_[frame_idx].item())
+        except Exception:
+            stamp_idx = -1
+
+        row = [
+            float(timestamp),          # timestamp
+            int(frame_idx),            # frame_idx (graph state index)
+            int(stamp_idx),            # index into tlist (if valid)
+            gyro_vec[0], gyro_vec[1], gyro_vec[2], bg_norm,
+            acc_vec[0], acc_vec[1], acc_vec[2], ba_norm,
+        ]
+
+        path = self.bias_log_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        write_header = (not self._bias_header_written) or (not path.exists())
+        with path.open("a", newline="") as handle:
+            writer = csv.writer(handle)
+            if write_header:
+                writer.writerow(
+                    [
+                        "timestamp",
+                        "frame_idx",
+                        "stamp_idx",
+                        "bg_x",
+                        "bg_y",
+                        "bg_z",
+                        "bg_norm",
+                        "ba_x",
+                        "ba_y",
+                        "ba_z",
+                        "ba_norm",
+                    ]
+                )
+                self._bias_header_written = True
+
+            writer.writerow(row)
+
+
     def init_IMU(self):
         """initialize IMU states"""
         cur_t = float(self.tlist[self.pg.tstamps_[self.t0]])
@@ -1149,24 +1326,24 @@ class DVIO:
 
                 self.cur_imu_ii += 1
 
-            # Initialize as the transformation matrix from camera to IMU
-            Twc = np.matmul(
-                np.array(
-                    [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.02 * i], [0, 0, 0, 1]]
-                ),
-                self.Ti1c,
-            )
-            #  perturb the camera poses, which benefits the robustness of initial BA
-            TTT = torch.tensor(np.linalg.inv(Twc))
-            # Convert the inverse of the homogeneous transformation matrix Twc to a PyTorch tensor. i.e. Tcw
-            q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
-            # Convert the rotation matrix to a quaternion
-            t = TTT[:3, 3]
-            if not self.imu_enabled:
-                # If IMU is not used (if it is false, it is initialized to false, so it will be executed)
-                self.pg.poses_[i] = torch.cat([t, q])
-                # Assign values
-                # gwp_donothing=1
+            # # Initialize as the transformation matrix from camera to IMU
+            # Twc = np.matmul(
+            #     np.array(
+            #         [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0.02 * i], [0, 0, 0, 1]]
+            #     ),
+            #     self.Ti1c,
+            # )
+            # #  perturb the camera poses, which benefits the robustness of initial BA
+            # TTT = torch.tensor(np.linalg.inv(Twc))
+            # # Convert the inverse of the homogeneous transformation matrix Twc to a PyTorch tensor. i.e. Tcw
+            # q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
+            # # Convert the rotation matrix to a quaternion
+            # t = TTT[:3, 3]
+            # if not self.imu_enabled:
+            #     # If IMU is not used (if it is false, it is initialized to false, so it will be executed)
+            #     self.pg.poses_[i] = torch.cat([t, q])
+            #     # Assign values
+            #     # gwp_donothing=1
 
     def __initialize(self):
         """initialize the DEIO system"""
@@ -1185,7 +1362,35 @@ class DVIO:
         # initialization complete Mark initialization as successful
         # Flag for completion of initialization
         self.is_initialized = True
+    def debug_rotation_imu_vs_visual(self, t0, t1, wTbs):
+        print("=== IMU vs Visual rotation check ===")
+        ang_errors = []
+        for i in range(t0, t1 - 1):
+            pose_i = gtsam.Pose3(wTbs[i])
+            pose_j = gtsam.Pose3(wTbs[i + 1])
+            R_wb_i = pose_i.rotation()
+            R_wb_j = pose_j.rotation()
 
+            # visual relative rotation (body-i -> body-j)
+            R_ij_vis = R_wb_i.inverse() * R_wb_j  # gtsam.Rot3
+
+            pim = self.state.preintegrations[i]
+            R_ij_imu = pim.deltaRij()  # this is Rot3 in body-i frame
+
+            # error rotation: imu^{-1} * visual
+            R_err = R_ij_imu.inverse() * R_ij_vis
+            xi = gtsam.Rot3.Logmap(R_err)  # 3-vector
+            ang = np.linalg.norm(xi)       # radians
+            ang_deg = ang * 180.0 / np.pi
+            ang_errors.append(ang_deg)
+
+            print(f"i={i}: rot_err = {ang_deg:.3f} deg")
+
+        if len(ang_errors) > 0:
+            print(f"RMS rot_err = {np.sqrt(np.mean(np.square(ang_errors))):.3f} deg")
+
+
+            
     def VisualIMUAlignment(self, t0, t1, ignore_lever, disable_scale=True):
         poses = SE3(self.pg.poses_)
         wTcs = poses.inv().matrix().cpu().numpy()
@@ -1197,6 +1402,8 @@ class DVIO:
             T_tmp[0:3, 3] = 0.0
             wTbs = np.matmul(wTcs, T_tmp)
         cost = 0.0
+        #self.debug_rotation_imu_vs_visual(t0, t1, wTbs)
+
 
         # solveGyroscopeBias
         A = np.zeros([3, 3])
@@ -1235,6 +1442,7 @@ class DVIO:
             A += np.matmul(tmp_A.T, tmp_A)
             b += np.matmul(tmp_A.T, tmp_b)
         bg = -np.matmul(np.linalg.inv(A), b)
+        print(bg)
 
         for i in range(0, t1 - 1):
             pim = gtsam.PreintegratedCombinedMeasurements(
@@ -1366,9 +1574,9 @@ class DVIO:
             s = 1.0
 
         # print('g,s:',g,s)
-        print(f"\033[31m the calculate g {g} and scaler {s} \033[0m ")
-        if math.fabs(np.linalg.norm(g) - 9.81) < 0.5 and s > 0:
-            print("V-I successfully initialized!")
+        print(f"\033[31m the calculate g {g0} and scaler {s} \033[0m ")
+        if math.fabs(np.linalg.norm(g0) - 9.81) < 0.5 and s > 0:
+            print("V-I successfully initialized! rad depth version")
 
         # visualInitialAlign
         wTbs[:, 0:3, 3] *= s  # !!!!!!!!!!!!!!!!!!!!!!!!
@@ -1457,7 +1665,6 @@ class DVIO:
                 self.VisualIMUAlignment(self.t1 - 8, self.t1, ignore_lever=False)
                 self.update()
                 # Update graph
-                self.VisualIMUAlignment(self.t1 - 8, self.t1, ignore_lever=False)
                 self.imu_enabled = True  # Turn on IMU after completing visual-inertial alignment (IMU will be used in BA update after this~)
             else:
                 # The following can be ignored
@@ -1489,6 +1696,9 @@ class DVIO:
                     ]
                 )
                 # Save the current pose to the list, #x,y,z xyzw
+                # Log IMU biases for this initialization frame
+                self._log_bias_state(i, float(self.tlist[i]))
+
 
                 TTTref = np.matmul(self.refTw, TTT)
                 # for visualization
@@ -1549,41 +1759,42 @@ class DVIO:
         self.cur_imu_ii += 1
 
         ## predict pose (<5 ms)
-        # decoupled: do NOT seed visual pose from IMU here
-        # (let the VO motion model handle self.pg.poses_[self.t1 - 1])
-        
+        if self.imu_enabled:
+            # If IMU is used
+            Twc = (self.state.wTbs[-1] * self.Tbc).matrix()
+            # The latest Twb*Tbc
+            TTT = torch.tensor(np.linalg.inv(Twc))
+            # Get its inverse, which is Tcw
+            q = torch.tensor(Rotation.from_matrix(TTT[:3, :3]).as_quat())
+            # Get the quaternion
+            t = TTT[:3, 3]
+            self.pg.poses_[self.t1 - 1] = torch.cat([t, q])
+            # Initialize the current pose
 
         self.update()
         # Perform update operation
 
         # Save and output the pose result
-        #if the system is on visual only mode save poses from dpvo's internal state
-        poses_vi = SE3(self.pg.poses_)
-            # Get pose
-        TTT_vi = np.matmul(
-        poses_vi[self.t1 - 1].cpu().inv().matrix(), np.linalg.inv(self.Ti1c)
+        poses = SE3(self.pg.poses_)
+        # Get pose
+        TTT = np.matmul(
+            poses[self.t1 - 1].cpu().inv().matrix(), np.linalg.inv(self.Ti1c)
         )
-        TTT = self.state.wTbs[self.t1 - 1].matrix()
-            
         # Get the latest frame and convert to body frame
         # If IMU is used or only visual is used and it has been initialized
         if self.imu_enabled or (self.visual_only and self.visual_only_init):
-            
             ppp = TTT[0:3, 3]
             qqq = Rotation.from_matrix(TTT[:3, :3]).as_quat()
             self.poses_save.append(
                 [cur_t, ppp[0], ppp[1], ppp[2], qqq[0], qqq[1], qqq[2], qqq[3]]
             )
-            ppp_vi = TTT_vi[0:3, 3]
-            qqq_vi = Rotation.from_matrix(TTT_vi[:3, :3]).as_quat()
-            self.poses_save_vi.append(
-                [cur_t, ppp_vi[0], ppp_vi[1], ppp_vi[2], qqq_vi[0], qqq_vi[1], qqq_vi[2], qqq_vi[3]]
-            )
+            self._log_bias_state(self.t1 - 1, float(cur_t))
             # Save the current pose to the list, #x,y,z xyzw
 
         self.keyframe()
         # Keyframe management
         self.t1 = self.n  # Update t1, because it might have been affected at the keyframe! (This should mainly affect initialization!!!)
+        #self._maybe_log_patch_depths(self.t1 - 1)
 
         ## Try visual-inertial initialization. try initializing VI (vi_warmup is the number of frames for visual initialization, which is 12)
         if (
@@ -1702,6 +1913,8 @@ class DVIO:
 
         if self.n == 8 and not self.is_initialized:
             self.__initialize()
+            self._maybe_log_patch_depths(self.n - 1)
+            
         elif self.is_initialized:
             self.VIO_update()
 
@@ -1716,10 +1929,6 @@ def CustomHessianFactor(values: gtsam.Values, H: np.ndarray, v: np.ndarray):
     info_expand[0:-1, -1] = v
     # This is meaningless.
     info_expand[-1, -1] = 0.0
-    # info_expand[:-1, :-1] = H
-    # info_expand[:-1, -1] = v
-    # info_expand[-1, :-1] = v
-    # info_expand[-1, -1] = 0.0
     h_f = gtsam.HessianFactor(values.keys(), [6] * len(values.keys()), info_expand)
     l_c = gtsam.LinearContainerFactor(h_f, values)
     return l_c

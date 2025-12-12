@@ -6,7 +6,8 @@ GRAVITY = 9.807
 
 
 class MultiSensorState:
-    def __init__(self):
+    def __init__(self, cfg=None):
+        self.cfg = cfg
         self.cur_t = 0.0
 
         """ IMU-centered states """
@@ -29,6 +30,69 @@ class MultiSensorState:
 
         self.marg_factor = None
         self.set_imu_params()
+
+        # IMU loosening controls
+        self.imu_gap_threshold = (
+            getattr(cfg, "IMU_GAP_THRESHOLD", 0.025) if cfg is not None else 0.025
+        )
+        self.low_motion_loosen = (
+            bool(getattr(cfg, "IMU_LOOSE_WITH_LOW_MOTION", False))
+            if cfg is not None
+            else False
+        )
+        self.low_motion_vel_thresh = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_VEL_THRESH", 0.05))
+            if cfg is not None
+            else 0.05
+        )
+        self.low_motion_duration = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_VEL_DURATION", 0.5))
+            if cfg is not None
+            else 0.5
+        )
+        self.low_motion_exit_ratio = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_VEL_EXIT_RATIO", 2.0))
+            if cfg is not None
+            else 2.0
+        )
+        if self.low_motion_exit_ratio < 1.0:
+            self.low_motion_exit_ratio = 1.0
+
+        self.low_accel_loosen = (
+            bool(getattr(cfg, "IMU_LOOSE_WITH_LOW_ACCEL", False))
+            if cfg is not None
+            else False
+        )
+        self.low_accel_thresh = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_ACCEL_THRESH", 0.05))
+            if cfg is not None
+            else 0.05
+        )
+        self.low_accel_duration = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_ACCEL_DURATION", 0.5))
+            if cfg is not None
+            else 0.5
+        )
+        self.low_accel_exit_ratio = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_ACCEL_EXIT_RATIO", 2.0))
+            if cfg is not None
+            else 2.0
+        )
+        if self.low_accel_exit_ratio < 1.0:
+            self.low_accel_exit_ratio = 1.0
+        self.low_accel_min_speed = (
+            float(getattr(cfg, "IMU_LOOSE_LOW_ACCEL_MIN_SPEED", 0.5))
+            if cfg is not None
+            else 0.5
+        )
+
+        self._low_motion_start_time = None
+        self._low_motion_active = False
+        self._low_accel_start_time = None
+        self._low_accel_active = False
+        self._active_preintegration_is_loose = False
+        self._last_velocity = None
+        self._last_velocity_time = None
 
     def set_imu_params(self, noise=None):
         # default
@@ -81,6 +145,7 @@ class MultiSensorState:
         self.preintegration_temp = gtsam.PreintegratedCombinedMeasurements(
             self.params, self.bs[-1]
         )
+        self._active_preintegration_is_loose = False
         self.gnss_valid.append(False)
         self.gnss_position.append(np.array([0.0, 0.0, 0.0]))
         self.odo_valid.append(False)
@@ -89,24 +154,18 @@ class MultiSensorState:
         self.cur_t = t
 
     def append_imu(self, t, measuredAcc, measuredOmega):
-        if t - self.cur_t > 0:
-            if t - self.cur_t > 0.025:  # IMU gap found, loose the IMU factor
-                new_preintegration = gtsam.PreintegratedCombinedMeasurements(
-                    self.params_loose, self.bs[-1]
-                )
-                for iii in range(len(self.preintegrations_meas[-1])):
-                    dd = self.preintegrations_meas[-1][iii]
-                    if dd[2] > 0:
-                        new_preintegration.integrateMeasurement(dd[0], dd[1], dd[2])
-                self.preintegrations[-1] = new_preintegration
+        dt = t - self.cur_t
+        if dt > 0:
+            if dt > self.imu_gap_threshold:
+                if not self._active_preintegration_is_loose:
+                    print("IMU gap detected; loosening preintegration noise.")
+                self._loosen_active_preintegration()
             self.preintegrations[-1].integrateMeasurement(
-                measuredAcc, measuredOmega, t - self.cur_t
+                measuredAcc, measuredOmega, dt
             )
-        if t - self.cur_t < 0:
+        if dt < 0:
             raise Exception("may not happen")
-        self.preintegrations_meas[-1].append(
-            [measuredAcc, measuredOmega, t - self.cur_t, t]
-        )
+        self.preintegrations_meas[-1].append([measuredAcc, measuredOmega, dt, t])
         # print('append_imu: ',measuredAcc,measuredOmega,t - self.cur_t,t)
         self.last_measuredAcc = measuredAcc
         self.last_measuredOmega = measuredOmega
@@ -130,6 +189,26 @@ class MultiSensorState:
         if self.preintegrations[-1].deltaTij() > 1.0:
             prop_state = gtsam.gtsam.NavState(self.wTbs[-1], self.vs[-1])
 
+        prop_velocity = np.asarray(prop_state.velocity(), dtype=np.float64)
+        speed = float(np.linalg.norm(prop_velocity))
+
+        accel_mag = None
+        if self._last_velocity is not None and self._last_velocity_time is not None:
+            dt_vel = t - self._last_velocity_time
+            if dt_vel > 0:
+                delta_v = prop_velocity - self._last_velocity
+                accel_mag = float(np.linalg.norm(delta_v) / dt_vel)
+
+        low_motion_active = self._should_loosen_for_low_motion(t, speed)
+        low_accel_active = self._should_loosen_for_low_accel(t, speed, accel_mag)
+        #print(t, speed, accel_mag, low_motion_active, low_accel_active)
+        if low_accel_active:
+            self._loosen_active_preintegration()
+            print("loosed")
+
+        self._last_velocity = prop_velocity.copy()
+        self._last_velocity_time = t
+
         self.timestamps.append(t)
         self.wTbs.append(prop_state.pose())
         self.vs.append(prop_state.velocity())
@@ -139,13 +218,16 @@ class MultiSensorState:
         self.odo_valid.append(False)  # 不用里程计，因此都为False
         self.odo_vel.append(np.array([0.0, 0.0, 0.0]))
 
+        loosen_enabled = self._low_motion_active or self._low_accel_active
+        next_params = self.params_loose if loosen_enabled else self.params
         self.preintegrations.append(
-            gtsam.PreintegratedCombinedMeasurements(self.params, self.bs[-1])
+            gtsam.PreintegratedCombinedMeasurements(next_params, self.bs[-1])
         )
         self.preintegrations_meas.append([])
         self.preintegration_temp = gtsam.PreintegratedCombinedMeasurements(
-            self.params, self.bs[-1]
+            next_params, self.bs[-1]
         )
+        self._active_preintegration_is_loose = next_params is self.params_loose
 
     # ugly implementation
     # this should be called after append_img()
@@ -167,3 +249,69 @@ class MultiSensorState:
         prev_state = gtsam.gtsam.NavState(self.wTbs[-1], self.vs[-1])
         prev_bias = self.bs[-1]
         self.preintegrations[-1].predict(prev_state, prev_bias)
+
+    def _should_loosen_for_low_motion(self, t, speed):
+        if not self.low_motion_loosen:
+            self._low_motion_start_time = None
+            self._low_motion_active = False
+            return False
+
+        if speed < self.low_motion_vel_thresh:
+            if self._low_motion_start_time is None:
+                self._low_motion_start_time = t
+            elif (t - self._low_motion_start_time) >= self.low_motion_duration:
+                self._low_motion_active = True
+        else:
+            exit_speed = self.low_motion_vel_thresh * self.low_motion_exit_ratio
+            if self._low_motion_active and speed < exit_speed:
+                # remain in low-motion mode until we clearly leave the dead-zone
+                pass
+            else:
+                self._low_motion_active = False
+                self._low_motion_start_time = None
+
+        return self._low_motion_active
+
+    def _should_loosen_for_low_accel(self, t, speed, accel_mag):
+        if not self.low_accel_loosen:
+            self._low_accel_start_time = None
+            self._low_accel_active = False
+            return False
+
+        valid_speed = speed is not None and speed >= self.low_accel_min_speed
+        if accel_mag is None or not valid_speed:
+            self._low_accel_start_time = None
+            self._low_accel_active = False
+            return False
+
+        if accel_mag < self.low_accel_thresh:
+            if self._low_accel_start_time is None:
+                self._low_accel_start_time = t
+            elif (t - self._low_accel_start_time) >= self.low_accel_duration:
+                self._low_accel_active = True
+                print("low accel active")
+        else:
+            exit_accel = self.low_accel_thresh * self.low_accel_exit_ratio
+            if self._low_accel_active and accel_mag < exit_accel:
+                pass
+            else:
+                self._low_accel_active = False
+                self._low_accel_start_time = None
+
+        return self._low_accel_active
+
+    def _loosen_active_preintegration(self):
+        if not self.preintegrations:
+            return
+        if not self.preintegrations_meas:
+            return
+        if self._active_preintegration_is_loose:
+            return
+
+        pim = gtsam.PreintegratedCombinedMeasurements(self.params_loose, self.bs[-1])
+        for measuredAcc, measuredOmega, dt, _ in self.preintegrations_meas[-1]:
+            if dt > 0:
+                pim.integrateMeasurement(measuredAcc, measuredOmega, dt)
+
+        self.preintegrations[-1] = pim
+        self._active_preintegration_is_loose = True

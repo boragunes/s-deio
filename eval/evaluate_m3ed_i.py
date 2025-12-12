@@ -61,12 +61,12 @@ def rgb_generator(
 
     N = data.shape[0] // stride
 
-    print("camera_model", camera_model.decode())
-    print("intrinsics", intrinsics)
-    print("intrinsics_new", intrinsics_new)
-    print("resolution", resolution)
-    print("distortion_model", distortion_model.decode())
-    print("distortion_coeffs", distortion_coeffs)
+    # print("camera_model", camera_model.decode())
+    # print("intrinsics", intrinsics)
+    # print("intrinsics_new", intrinsics_new)
+    # print("resolution", resolution)
+    # print("distortion_model", distortion_model.decode())
+    # print("distortion_coeffs", distortion_coeffs)
 
     for t, image in tqdm(islice(zip(ts, data), start, stop, stride), total=N):
         if scale != 1.0:
@@ -180,10 +180,10 @@ def main():
             timing_file=args.timeit_file,
         )
         
-        
+        #extract imu intrinsics
         slam.Ti1c = read_extrinsic_imu(args.data_h5, args.imu, args.camera)
         slam.Tbc = gtsam.Pose3(slam.Ti1c)
-        slam.state.set_imu_params([0.64, 0.20, 0.000003, 4.0e-8])
+        slam.state.set_imu_params([0.7, 0.15, 0.0001, 3.0e-5])
         slam.all_imu = read_imu(args.data_h5, args.imu)
 
         generator1 = pgenerator(
@@ -207,7 +207,7 @@ def main():
             clahe=args.clahe,
         )
         for i, ((t1, image1, intrinsics1), (t2, image2, intrinsics2)) in enumerate(
-            zip(generator1, generator2, strict=False)
+            zip(generator1, generator2)
         ):
             if args.show:
                 concat = cv2.hconcat([image1, image2])
@@ -233,7 +233,7 @@ def main():
         colors = slam.pg.colors_.view(-1, 3).cpu().numpy()[: slam.m]
         points_idx = slam.pg.tstamps_[slam.pg.ix[: slam.m].cpu().numpy()]
 
-        poses, tstamps ,poses_vi,tstamps_vi = slam.terminate()
+        poses, tstamps  = slam.terminate()
 
     if args.profile:
         profile.disable()
@@ -248,10 +248,10 @@ def main():
         orientations_quat_wxyz=poses[:, [6, 3, 4, 5]],
         timestamps=tstamps,
     )
-    traj_est_vi = PoseTrajectory3D(
-        positions_xyz=poses_vi[:, :3],
-        orientations_quat_wxyz=poses_vi[:, [6, 3, 4, 5]],
-        timestamps=tstamps_vi,)
+    # traj_est_vi = PoseTrajectory3D(
+    #     positions_xyz=poses_vi[:, :3],
+    #     orientations_quat_wxyz=poses_vi[:, [6, 3, 4, 5]],
+    #     timestamps=tstamps_vi,)
 
     if args.save_trajectory:
         os.makedirs("saved_trajectories", exist_ok=True)
@@ -259,11 +259,11 @@ def main():
             f"saved_trajectories/M3ED_dvio_{scene}{args.name}.txt", traj_est
         )
 
-    if args.save_trajectory:
-        os.makedirs("saved_trajectories", exist_ok=True)
-        file_interface.write_tum_trajectory_file(
-            f"saved_trajectories/M3ED_dvio_{scene}{args.name}_vi.txt", traj_est_vi
-        )
+    # if args.save_trajectory:
+    #     os.makedirs("saved_trajectories", exist_ok=True)
+    #     file_interface.write_tum_trajectory_file(
+    #         f"saved_trajectories/M3ED_dvio_{scene}{args.name}_vi.txt", traj_est_vi
+    #     )
     if args.save_ply:
         save_ply(scene, points, colors)
 

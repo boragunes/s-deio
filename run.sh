@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCENE="spot_outdoor_day_srt_under_bridge_1"
-DATA="${HOME}/m3ed/m3ed/${SCENE}/${SCENE}_data.h5"
-GT="${HOME}/m3ed/m3ed/${SCENE}/${SCENE}_pose_evo_gt.txt"
+# Eğer komut satırında sahne verilmezse, buradaki default liste kullanılır
+SCENES=(
+    "falcon_outdoor_day_fast_flight_1"
+
+)
+
+# Komut satırından sahne isimleri verilmişse onları kullan
+if (( "$#" > 0 )); then
+    SCENES=("$@")
+fi
+
+BASE_DIR="${HOME}/m3ed/m3ed"
 CFG="config/superfast.yaml"
 OUTDIR="saved_trajectories"
 
@@ -21,58 +30,43 @@ move_latest() {
         mv "${latest}" "${newname}"
         echo " -> ${newname}"
     else
-        echo " -> WARN: pattern bulunamadı: ${pattern}"
+        echo " -> WARN: pattern bulunamadi: ${pattern}"
     fi
 }
 
-for i in $(seq -w 0 9); do
-    echo "========================="
-    echo "TRIAL ${i}"
-    echo "========================="
+for SCENE in "${SCENES[@]}"; do
+    DATA="${BASE_DIR}/${SCENE}/${SCENE}_data.h5"
+    GT="${BASE_DIR}/${SCENE}/${SCENE}_pose_evo_gt.txt"
 
-    #
-    # 1) DVIO / EIV scripti
-    #
-    python3 eval/evaluate_m3ed_i.py \
-        "${DATA}" \
-        --gt "${GT}" \
-        --save_trajectory \
-        --plot \
-        --config "${CFG}"\
-        --scale 0.5
+    echo "########################################"
+    echo "SCENE: ${SCENE}"
+    echo "DATA:  ${DATA}"
+    echo "GT:    ${GT}"
+    echo "########################################"
 
-    # dvio ana traj
-    move_latest \
-        "${OUTDIR}/M3ED_dvio_${SCENE}_data.txt" \
-        "${OUTDIR}/M3ED_dvio_${SCENE}_trial_${i}.txt"
+    for i in $(seq -w 0 4); do
+        echo "========================="
+        echo "TRIAL ${i} - ${SCENE}"
+        echo "========================="
 
-    # dvio vi traj
-    move_latest \
-        "${OUTDIR}/M3ED_dvio_${SCENE}_data_vi.txt" \
-        "${OUTDIR}/M3ED_dvio_${SCENE}_trial_${i}_vi.txt"
+        #
+        # 1) DVIO / EIV scripti
+        #
+        python3 eval/evaluate_m3ed_i.py \
+            "${DATA}" \
+            --gt "${GT}" \
+            --save_trajectory \
+            --plot \
+            --config "${CFG}" \
+            --scale 0.5
+         
 
-    #
-    # 2) DEIO / I scripti
-    #
-    python3 eval/evaluate_m3ed_eiv.py \
-        "${DATA}" \
-        --gt "${GT}" \
-        --save_trajectory \
-        --plot \
-        --config "${CFG}" \
-        --scale 0.5
+        # dvio ana traj
+        move_latest \
+            "${OUTDIR}/M3ED_${SCENE}_data.txt" \
+            "${OUTDIR}/M3ED_${SCENE}_trial_${i}.txt"
 
-    # deio ana traj
-    move_latest \
-        "${OUTDIR}/M3ED_deio_${SCENE}_data.txt" \
-        "${OUTDIR}/M3ED_deio_${SCENE}_trial_${i}.txt"
-
-    # deio vi traj
-    move_latest \
-        "${OUTDIR}/M3ED_deio_${SCENE}_data_vi.txt" \
-        "${OUTDIR}/M3ED_deio_${SCENE}_trial_${i}_vi.txt"
-
-    echo
+    done
 done
 
 echo "Bitti."

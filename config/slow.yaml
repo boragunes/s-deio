@@ -26,3 +26,10 @@ NORM: 'std'
 # Eval mode of patch selector (random, topk, multinomial)
 SCORER_EVAL_MODE: 'multi'
 SCORER_EVAL_USE_GRID: True
+
+# patch depth logging
+LOG_PATCH_DEPTHS: False
+PATCH_DEPTH_LOG_FILE: 'patch_depths.csv'
+PATCH_DEPTH_FILTER_IDS: []
+PATCH_DEPTH_FILTER_PIXELS: []
+PATCH_DEPTH_PIXEL_TOL: 2.0

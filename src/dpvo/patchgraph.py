@@ -33,6 +33,7 @@ class PatchGraph:
 
         self.points_ = torch.zeros(self.N * self.M, 3, dtype=torch.float, device="cuda")
         self.colors_ = torch.zeros(self.N, self.M, 3, dtype=torch.uint8, device="cuda")
+        self.scores_ = torch.zeros(self.N, self.M, dtype=torch.float, device="cuda")
 
         self.index_ = torch.zeros(self.N, self.M, dtype=torch.long, device="cuda")
         self.index_map_ = torch.zeros(self.N, dtype=torch.long, device="cuda")

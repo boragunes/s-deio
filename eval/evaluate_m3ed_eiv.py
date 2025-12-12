@@ -98,7 +98,7 @@ def ev_generator(
             tx = (tx * scale).astype(np.int32)
             ty = (ty * scale).astype(np.int32)
 
-        print("event count", idx1 - idx0)
+        #print("event count", idx1 - idx0)
 
         rect = rect_map[ty, tx]
         x_rect = np.ascontiguousarray(rect[..., 0])
@@ -106,7 +106,7 @@ def ev_generator(
 
         tperf = time.perf_counter()
         voxel = to_voxel_grid(x_rect, y_rect, tb, tp, H, W, bins)
-        print("to_voxel_grid time", time.perf_counter() - tperf)
+        #print("to_voxel_grid time", time.perf_counter() - tperf)
 
         yield (t1_ms / 1e3, voxel, intrinsics_new)
 
@@ -211,7 +211,7 @@ def main():
 
         slam.Ti1c = read_extrinsic_imu(args.data_h5, args.imu, args.camera)
         slam.Tbc = gtsam.Pose3(slam.Ti1c)
-        slam.state.set_imu_params([0.64, 0.20, 0.000003, 4.0e-8])
+        slam.state.set_imu_params([0.16*100, 0.05*100, 0.003*10, 4.0e-5*10])
         slam.all_imu = read_imu(args.data_h5, args.imu)
 
         generator1 = pgenerator(
@@ -267,7 +267,7 @@ def main():
         colors = slam.pg.colors_.view(-1, 3).cpu().numpy()[: slam.m]
         points_idx = slam.pg.tstamps_[slam.pg.ix[: slam.m].cpu().numpy()]
 
-        poses, tstamps,poses_vi,tstamps_vi = slam.terminate()
+        poses, tstamps  = slam.terminate()
 
     if args.profile:
         profile.disable()
@@ -282,22 +282,22 @@ def main():
         orientations_quat_wxyz=poses[:, [6, 3, 4, 5]],
         timestamps=tstamps,
     )
-    traj_est_vi = PoseTrajectory3D(
-        positions_xyz=poses_vi[:, :3],
-        orientations_quat_wxyz=poses_vi[:, [6, 3, 4, 5]],
-        timestamps=tstamps_vi,
-    )
+    # traj_est_vi = PoseTrajectory3D(
+    #     positions_xyz=poses_vi[:, :3],
+    #     orientations_quat_wxyz=poses_vi[:, [6, 3, 4, 5]],
+    #     timestamps=tstamps_vi,
+    # )
 
     if args.save_trajectory:
         os.makedirs("saved_trajectories", exist_ok=True)
         file_interface.write_tum_trajectory_file(
-            f"saved_trajectories/M3ED_deio_{scene}{args.name}.txt", traj_est
+            f"saved_trajectories/M3ED_{scene}.txt", traj_est
         )
-    if args.save_trajectory:
-        os.makedirs("saved_trajectories", exist_ok=True)
-        file_interface.write_tum_trajectory_file(
-            f"saved_trajectories/M3ED_deio_{scene}{args.name}_vi.txt", traj_est_vi
-        )
+    # if args.save_trajectory:
+    #     os.makedirs("saved_trajectories", exist_ok=True)
+    #     file_interface.write_tum_trajectory_file(
+    #         f"saved_trajectories/M3ED_deio_{scene}{args.name}_vi.txt", traj_est_vi
+    #     )
 
     if args.save_ply:
         save_ply(scene, points, colors)
